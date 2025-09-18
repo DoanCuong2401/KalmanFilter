@@ -1,0 +1,55 @@
+import cv2
+import numpy as np
+
+# --- Tạo Kalman Filter ---
+kalman = cv2.KalmanFilter(4, 2)
+kalman.measurementMatrix = np.array([[1,0,0,0],[0,1,0,0]], np.float32)
+kalman.transitionMatrix  = np.array([[1,0,1,0],
+                                     [0,1,0,1],
+                                     [0,0,1,0],
+                                     [0,0,0,1]], np.float32)
+kalman.processNoiseCov   = np.eye(4, dtype=np.float32) * 0.03
+
+# --- Mở camera hoặc file video ---
+cap = cv2.VideoCapture(0)   # đổi thành "video.mp4" nếu test bằng video
+
+# Ngưỡng màu xanh trong HSV
+lower_blue = np.array([100, 150, 50])
+upper_blue = np.array([140, 255, 255])
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    # --- Chuyển sang HSV và tạo mask màu xanh ---
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, lower_blue, upper_blue)
+
+    # --- Tìm contour lớn nhất (vật thể màu xanh) ---
+    contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    center = None
+    if contours:
+        c = max(contours, key=cv2.contourArea)
+        (x, y), radius = cv2.minEnclosingCircle(c)
+        if radius > 5:  # bỏ nhiễu nhỏ
+            center = np.array([[np.float32(x)], [np.float32(y)]])
+            # Vẽ detection thô (không Kalman) màu đỏ
+            cv2.circle(frame, (int(x), int(y)), 10, (0,0,255), -1)
+
+    # --- Kalman Filter ---
+    prediction = kalman.predict()
+    pred_pt = (int(prediction[0]), int(prediction[1]))
+    cv2.circle(frame, pred_pt, 10, (0,255,0), 2)  # Xanh lá = Kalman
+
+    if center is not None:
+        kalman.correct(center)
+
+    cv2.imshow("Blue Pen Tracking (Red=raw, Green=Kalman)", frame)
+    cv2.imshow("Mask", mask)
+
+    if cv2.waitKey(30) & 0xFF == 27:  # ESC để thoát
+        break
+
+cap.release()
+cv2.destroyAllWindows()
